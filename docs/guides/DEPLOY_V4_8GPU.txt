@@ -1,0 +1,207 @@
+YOLO26-SeaTrash v4.0 部署指南
+================================
+
+## 硬件配置
+
+服务器: 8× NVIDIA GeForce RTX 4090
+- 单卡显存: 24GB
+- 总显存: 192GB
+- CUDA版本: 12.8
+- 驱动版本: 570.211.01
+
+## 部署步骤
+
+### 1. 克隆项目
+
+```bash
+git clone https://github.com/1225Sakura/YOLO26-SeaTrash.git
+cd YOLO26-SeaTrash
+```
+
+### 2. 准备数据集
+
+将数据集放置在 `data/datasets/marine_debris_unified/` 目录：
+
+```
+data/datasets/marine_debris_unified/
+├── data.yaml          # 数据集配置
+├── images/
+│   ├── train/         # 训练集图片
+│   ├── val/           # 验证集图片
+│   └── test/          # 测试集图片
+└── labels/
+    ├── train/         # 训练集标签
+    ├── val/           # 验证集标签
+    └── test/          # 测试集标签
+```
+
+### 3. 准备预训练模型
+
+将v1.0 best.pt放置在：
+```
+outputs/training_archive/v1.0/models/best.pt
+```
+
+或从头训练（需要YOLO26x预训练权重）
+
+### 4. 安装依赖
+
+```bash
+pip install ultralytics torch torchvision opencv-python
+```
+
+### 5. 启动训练
+
+#### 方式1: 使用启动脚本（推荐）
+
+```bash
+./start_v4_training.sh
+```
+
+#### 方式2: 直接运行
+
+```bash
+python3 scripts/training/train_v4_8gpu.py
+```
+
+#### 方式3: 后台运行
+
+```bash
+nohup python3 scripts/training/train_v4_8gpu.py > logs/train_v4.log 2>&1 &
+```
+
+### 6. 监控训练
+
+```bash
+# 查看实时日志
+tail -f logs/train_v4_*.log
+
+# 查看GPU使用情况
+watch -n 1 nvidia-smi
+
+# 查看训练进程
+ps aux | grep train_v4
+```
+
+## v4.0 训练配置
+
+### 核心参数
+
+- **GPUs**: 8× RTX 4090 (device: 0,1,2,3,4,5,6,7)
+- **Batch Size**: 80 (10 per GPU)
+- **Workers**: 16 (2 per GPU)
+- **Epochs**: 1000
+- **Image Size**: 640×640
+- **Patience**: 200 (early stopping)
+
+### 优化策略
+
+1. **Loss Weights**
+   - box: 7.5
+   - cls: 0.25 (降低以提升召回率)
+   - dfl: 1.5
+
+2. **Optimizer**
+   - Type: AdamW
+   - Learning Rate: 0.001 → 0.00001
+   - Weight Decay: 0.0005
+   - Warmup: 5 epochs
+
+3. **Data Augmentation**
+   - HSV: h=0.025, s=0.8, v=0.5 (水域色彩)
+   - Perspective: 0.0005 (水面角度)
+   - Flip: ud=0.2, lr=0.5
+   - Mosaic: 1.0
+   - Mixup: 0.15
+   - Copy-Paste: 0.1
+
+4. **Regularization**
+   - Label Smoothing: 0.1
+   - AMP: Enabled (混合精度)
+   - Cache: Enabled (图像缓存)
+
+## 预期性能
+
+### 训练时间
+
+- 预计总时长: 18-24小时
+- 单epoch时间: ~1-1.5分钟
+- 检查点保存: 每50 epochs
+
+### 目标指标
+
+- mAP50: ≥ 90% (当前v3.0: 88.31%)
+- Recall: ≥ 85% (当前v3.0: 83.85%)
+- Precision: ≥ 88% (当前v3.0: 86.94%)
+
+### 输出文件
+
+训练完成后，结果保存在：
+```
+outputs/runs/train/marine_debris_v4.0_8gpu/
+├── weights/
+│   ├── best.pt        # 最佳模型 (~113MB)
+│   └── last.pt        # 最后模型
+├── results.csv        # 训练指标
+├── results.png        # 训练曲线
+├── confusion_matrix.png
+├── PR_curve.png
+└── F1_curve.png
+```
+
+## 故障排查
+
+### GPU内存不足
+
+如果遇到OOM错误：
+1. 降低batch size: 80 → 64
+2. 减少workers: 16 → 8
+3. 禁用cache: cache=False
+
+### 训练速度慢
+
+1. 确认AMP已启用: amp=True
+2. 确认cache已启用: cache=True
+3. 检查数据加载: workers=16
+
+### 性能不达标
+
+1. 增加训练轮数: epochs=1000 → 1500
+2. 调整loss权重: cls=0.25 → 0.2
+3. 增强数据增强: mixup=0.15 → 0.2
+
+## 训练完成后
+
+### 1. 评估模型
+
+```bash
+python3 scripts/tests/validate_best_model.py
+```
+
+### 2. 视频推理
+
+```bash
+python3 scripts/inference/inference_v3.py  # 修改模型路径为v4.0
+```
+
+### 3. 归档结果
+
+```bash
+mkdir -p outputs/training_archive/v4.0
+cp -r outputs/runs/train/marine_debris_v4.0_8gpu/* outputs/training_archive/v4.0/
+```
+
+### 4. 更新文档
+
+更新 PROGRESS.md 中的v4.0训练结果
+
+## 联系方式
+
+如有问题，请提交Issue到：
+https://github.com/1225Sakura/YOLO26-SeaTrash/issues
+
+---
+
+**创建日期**: 2026-02-28
+**适用版本**: v4.0
+**硬件要求**: 8× RTX 4090 或同等配置
